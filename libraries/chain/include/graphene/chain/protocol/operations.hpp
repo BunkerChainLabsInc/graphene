@@ -91,7 +91,9 @@ namespace graphene { namespace chain {
             transfer_from_blind_operation,
             asset_settle_cancel_operation,  // VIRTUAL
             asset_claim_fees_operation,
-            fba_distribute_operation        // VIRTUAL
+            fba_distribute_operation,        // VIRTUAL
+            asset_update_dividend_operation,
+            asset_dividend_distribution_operation // VIRTUAL
          > operation;
 
    /// @} // operations group

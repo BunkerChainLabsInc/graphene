@@ -33,6 +33,7 @@
 #include <boost/version.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/algorithm/string/replace.hpp>
+#include <boost/algorithm/string/join.hpp>
 
 #include <boost/range/adaptor/map.hpp>
 #include <boost/range/algorithm_ext/erase.hpp>
@@ -123,6 +124,7 @@ public:
    std::string operator()(const account_create_operation& op)const;
    std::string operator()(const account_update_operation& op)const;
    std::string operator()(const asset_create_operation& op)const;
+   std::string operator()(const asset_dividend_distribution_operation& op)const;
 };
 
 template<class T>
@@ -1199,6 +1201,27 @@ public:
       return sign_transaction( tx, broadcast );
    } FC_CAPTURE_AND_RETHROW( (symbol)(new_options)(broadcast) ) }
 
+   signed_transaction update_dividend_asset(string symbol,
+                                            dividend_asset_options new_options,
+                                            bool broadcast /* = false */)
+   { try {
+      optional<asset_object> asset_to_update = find_asset(symbol);
+      if (!asset_to_update)
+        FC_THROW("No asset with that symbol exists!");
+
+      asset_update_dividend_operation update_op;
+      update_op.issuer = asset_to_update->issuer;
+      update_op.asset_to_update = asset_to_update->id;
+      update_op.new_options = new_options;
+
+      signed_transaction tx;
+      tx.operations.push_back( update_op );
+      set_operation_fees( tx, _remote_db->get_global_properties().parameters.current_fees);
+      tx.validate();
+
+      return sign_transaction( tx, broadcast );
+   } FC_CAPTURE_AND_RETHROW( (symbol)(new_options)(broadcast) ) }
+
    signed_transaction update_asset_feed_producers(string symbol,
                                                   flat_set<string> new_feed_producers,
                                                   bool broadcast /* = false */)
@@ -2207,7 +2230,7 @@ public:
             << "\n====================================================================================="
             << "|=====================================================================================\n";
 
-         for (int i = 0; i < bids.size() || i < asks.size() ; i++)
+         for (unsigned i = 0; i < bids.size() || i < asks.size() ; i++)
          {
             if ( i < bids.size() )
             {
@@ -2618,9 +2641,7 @@ std::string operation_printer::operator()(const T& op)const
    operation_result_printer rprinter(wallet);
    std::string str_result = result.visit(rprinter);
    if( str_result != "" )
-   {
       out << "   result: " << str_result;
-   }
    return "";
 }
 std::string operation_printer::operator()(const transfer_from_blind_operation& op)const
@@ -2698,6 +2719,22 @@ std::string operation_printer::operator()(const asset_create_operation& op) cons
       out << "User-Issue Asset ";
    out << "'" << op.symbol << "' with issuer " << wallet.get_account(op.issuer).name;
    return fee(op.fee);
+}
+
+std::string operation_printer::operator()(const asset_dividend_distribution_operation& op)const
+{
+   asset_object dividend_paying_asset = wallet.get_asset(op.dividend_asset_id);
+   account_object receiver = wallet.get_account(op.account_id);
+
+   out << receiver.name << " received dividend payments for " << dividend_paying_asset.symbol << ": ";
+   std::vector<std::string> pretty_payout_amounts;
+   for (const asset& payment : op.amounts)
+   {
+      asset_object payout_asset = wallet.get_asset(payment.asset);
+      pretty_payout_amounts.push_back(payout_asset.amount_to_pretty_string(payout_asset.amount));
+   }
+   out << boost::algorithm::join(pretty_payout_amounts, ", ");
+   return "";
 }
 
 std::string operation_result_printer::operator()(const void_result& x) const
@@ -2788,7 +2825,7 @@ vector<operation_detail> wallet_api::get_account_history(string name, int limit)
          auto memo = o.op.visit(detail::operation_printer(ss, *my, o.result));
          result.push_back( operation_detail{ memo, ss.str(), o } );
       }
-      if( current.size() < std::min(100,limit) )
+      if( (int)current.size() < std::min(100,limit) )
          break;
       limit -= current.size();
    }
